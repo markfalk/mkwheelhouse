@@ -94,6 +94,10 @@ class Bucket(object):
         with UrlSafeS3Connection(self.s3):
             return key.generate_url(expires_in=0, query_auth=False)
 
+    def generate_cloudfronted_url(self, key):
+        key = self.get_key(key)
+        return "https://{}/{}".format(key.bucket.name, key.key)
+        
     def list(self):
         return self.bucket.list(prefix=self.prefix)
 
@@ -115,12 +119,16 @@ class Bucket(object):
     def list_wheels(self):
         return [key for key in self.list() if key.name.endswith('.whl')]
 
-    def make_index(self):
+    def make_index(self, cloudfronted):
         doc, tag, text = yattag.Doc().tagtext()
         with tag('html'):
             for key in self.list_wheels():
-                with tag('a', href=self.generate_url(key)):
-                    text(key.name)
+                if cloudfronted:
+                    with tag('a', href=self.generate_cloudfronted_url(key)):
+                        text(key.name)
+                else:
+                    with tag('a', href=self.generate_url(key)):
+                        text(key.name)
                 doc.stag('br')
 
         return doc.getvalue()
@@ -154,6 +162,8 @@ def parse_args():
                         help='wheels to exclude from upload')
     parser.add_argument('-a', '--acl', metavar='POLICY', default='private',
                         help='canned ACL policy to apply to uploaded objects')
+    parser.add_argument('-c', '--cloudfronted', action='store_true',
+                        help='Generate Cloudfronted URLs for the index')
     parser.add_argument('bucket',
                         help='the Amazon S3 bucket to upload wheels to')
     args, pip_wheel_args = parser.parse_known_args()
@@ -171,7 +181,7 @@ def run(args, pip_wheel_args):
     index_url = bucket.generate_url('index.html')
     build_dir = build_wheels(index_url, pip_wheel_args, args.exclude)
     bucket.sync(build_dir, acl=args.acl)
-    bucket.put(bucket.make_index(), key='index.html', acl=args.acl)
+    bucket.put(bucket.make_index(cloudfronted=args.cloudfronted), key='index.html', acl=args.acl)
     shutil.rmtree(build_dir)
     print('mkwheelhouse: index written to', index_url)
 
